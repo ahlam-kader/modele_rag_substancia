@@ -2,6 +2,7 @@ fastapi
 uvicorn
 python-multipart
 pymupdf
+sentence-transformers
 faiss-cpu
 mistralai
 numpy
