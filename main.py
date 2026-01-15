@@ -28,12 +28,15 @@ class AskRequest(BaseModel):
 class SubstanciaEngineUniversal:
     def __init__(self, api_key):
         self.client = Mistral(api_key=api_key)
-        self.encoder = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+        # Supprime ou commente la ligne self.encoder
+        # self.encoder = SentenceTransformer(...) 
         self.chunks = []
         self.index = None
         self.documents_meta = {}
-        self.last_question = ""
         self.last_context = ""
+        self.user_profile = {}
+        self.load_index_if_exists()
+        self.last_question = ""
         self.last_answer = ""
         # Le profil sera écrasé par celui du front
         self.user_profile = {}
