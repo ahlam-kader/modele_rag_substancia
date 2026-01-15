@@ -9,8 +9,8 @@ import random
 from typing import List, Optional, Union
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
 from mistralai import Mistral
+import uvicorn
 
 app = FastAPI()
 
@@ -24,21 +24,17 @@ class AskRequest(BaseModel):
     chat_history: List[ChatMessage]
     user_profile: dict  # Reçu du front-end
 
-# --- Ta Classe Originale (Presque inchangée) ---
+# --- Classe Moteur RAG ---
 class SubstanciaEngineUniversal:
     def __init__(self, api_key):
         self.client = Mistral(api_key=api_key)
-        # Supprime ou commente la ligne self.encoder
-        # self.encoder = SentenceTransformer(...) 
+        # self.encoder supprimé car on utilise l'API Mistral Embeddings (gain de RAM)
         self.chunks = []
         self.index = None
         self.documents_meta = {}
-        self.last_context = ""
-        self.user_profile = {}
-        self.load_index_if_exists()
         self.last_question = ""
+        self.last_context = ""
         self.last_answer = ""
-        # Le profil sera écrasé par celui du front
         self.user_profile = {}
         self.load_index_if_exists()
 
@@ -98,6 +94,7 @@ class SubstanciaEngineUniversal:
         if not self.chunks: return "❌ PDF vides."
 
         contents = [c["content"] for c in self.chunks]
+        # Ingestion par lots pour éviter de surcharger l'API si le PDF est énorme
         embeddings = np.vstack(self.get_embedding(contents)).astype("float32")
         faiss.normalize_L2(embeddings)
         self.index = faiss.IndexFlatIP(embeddings.shape[1])
@@ -307,11 +304,10 @@ class SubstanciaEngineUniversal:
         answer = response.choices[0].message.content
         return answer, sources_md
 
-# --- Initialisation ---
-MISTRAL_KEY = os.getenv("MISTRAL_API_KEY") # Plus besoin de mettre la clé en dur ici
+MISTRAL_KEY = os.getenv("MISTRAL_API_KEY")
 engine = SubstanciaEngineUniversal(MISTRAL_KEY)
 
-# --- Endpoints API ---
+# --- Endpoints ---
 @app.post("/upload")
 async def upload_pdf(files: List[UploadFile] = File(...)):
     os.makedirs("temp", exist_ok=True)
@@ -321,26 +317,16 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
         with open(path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         file_paths.append(path)
-    
     res = engine.ingest_pdfs(file_paths)
     return {"status": res}
 
 @app.post("/ask")
 async def ask_api(request: AskRequest):
-    # Mise à jour dynamique du profil utilisateur depuis le front
     engine.user_profile = request.user_profile
-    
-    # Conversion du format Pydantic vers list de dicts pour la fonction ask
     history = [{"role": m.role, "content": m.content} for m in request.chat_history]
-    
     answer, sources = engine.ask(request.question, history)
-    
-    return {
-        "answer": answer,
-        "sources": sources
-    }
+    return {"answer": answer, "sources": sources}
 
 if __name__ == "__main__":
-    import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
